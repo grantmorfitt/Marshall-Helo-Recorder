@@ -36,9 +36,9 @@ class AppGUI:
         # Buttons
         tk.Button(root, text="Start", command=self.start_acquisition, width=15).grid(row=1, column=0, padx=10, pady=10)
         tk.Button(root, text="Stop", command=self.stop_acquisition, width=15).grid(row=1, column=1, padx=10, pady=10)
-        tk.Button(root, text="Reset Counter", command=self.reset_counter, width=15).grid(row=1, column=2, padx=10, pady=10)
-        tk.Button(root, text="Quit", command=root.quit, width=15).grid(row=1, column=3, padx=10, pady=10)
+        tk.Button(root, text="Quit", command= lambda: root.destroy(), width=15).grid(row=1, column=3, padx=10, pady=10)
 
+        
     def log(self, msg):
         timestamp = datetime.now().strftime('%H:%M:%S')
         self.log_box.config(state='normal')
@@ -49,31 +49,26 @@ class AppGUI:
     def get_filename(self):
         name = self.filename_entry.get().strip()
         if not name:
-            return "data_log.csv"
-        if not name.lower().endswith(".csv"):
-            name += ".csv"
-        return name
-
+            return "data"
+        else: return name
+        
     def start_acquisition(self):
         
         DIfilename = "ControlPositions_" + self.get_filename()
-        SpatialFileName = "SpatialFOG_" + self.get_filename()
+        if not DIfilename.lower().endswith(".csv"):
+            DIfilename += ".csv"
         threading.Thread(target=self.data_recorder1.start_acquisition, args = (DIfilename,), daemon=True).start()
         
+        SpatialFileName = "SpatialFOG_" + self.get_filename()
         threading.Thread(target=self.data_recorder2.start_acquisition, args = (SpatialFileName,), daemon=True).start()
 
-        #self.data_recorder1.start_acquisition(self.get_filename())
-        #self.data_recorder2.start_acquisition(self.get_filename())
         
         #this will need to pass filenames over once I get it set up properly
         print("lorem")
     def stop_acquisition(self):
         self.data_recorder1.stop_acquisition()
         self.data_recorder2.stop_acquisition()
-        
-    def reset_counter(self):
-        self.data_recorder1.reset_counter()
-
+    
 
 class DIDataRecorder:
     def __init__(self, log_callback):
@@ -160,7 +155,8 @@ class DIDataRecorder:
         self.stop_event.set()
         self.send_cmd("stop")
         self.log("Stop pressed. Acquisition stopped.")
-
+        self.ser.close()
+        
     def reset_counter(self):
         self.send_cmd("reset 1")
         self.log("Counter reset sent.")
@@ -183,7 +179,7 @@ class DIDataRecorder:
                     time.sleep(0.1)
             self.log(f"Data written to {filename}")
         except Exception as e:
-            self.log(f"Error: {e}")
+            self.log(f"Control Record Error: {e}")
         finally:
             self.acquiring = False
             self.send_cmd("stop")
@@ -202,6 +198,7 @@ class SpatialFogDataRecorder:
     def stop_acquisition(self):
         self.stop_event.set()
         self.acquiring = False
+        self.ser.close()
         
     def start_acquisition(self, filename):
         
@@ -226,23 +223,25 @@ class SpatialFogDataRecorder:
     
           spatial.get_device_and_configuration_information()
           self.acquiring = True
-          
-          while spatial.is_open:
-              if spatial.in_waiting() > 0:
-                  if not self.stop_event.is_set():
-                      # Get bytes in serial buffer
-                      bytes_in_buffer = spatial.in_waiting()
-                      data_bytes = spatial.read(bytes_in_buffer)
-        
-                      # Record in log file the raw binary of ANPP packets
-                      logFile.write(data_bytes)
-        
-                      self.log(datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + " Spatial Record Bytes")
-                  else:
-                      logFile.close()
-                      self.acquiring = False
-                      break;
-                      
+          try:
+              while spatial.is_open:
+                  if spatial.in_waiting() > 0:
+                      if not self.stop_event.is_set():
+                          # Get bytes in serial buffer
+                          bytes_in_buffer = spatial.in_waiting()
+                          data_bytes = spatial.read(bytes_in_buffer)
+            
+                          # Record in log file the raw binary of ANPP packets
+                          logFile.write(data_bytes)
+            
+                          self.log(datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + " Spatial Record Bytes")
+                      else:
+                          logFile.close()
+                          self.acquiring = False
+                          self.log(f"Data written to {filename}")
+                          break;
+          except Exception as e:
+              self.log(f"Spatial FOG Error: {e}")       
 
 
 
