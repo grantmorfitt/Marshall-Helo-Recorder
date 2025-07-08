@@ -182,9 +182,14 @@ class DIDataRecorder:
                 while self.acquiring and not self.stop_event.is_set():
                     if self.ser.in_waiting >= 2 * len(self.slist):
                         row = [datetime.now().strftime('%H:%M:%S')]
-                        for _ in self.slist:
+                        for i in self.slist:
+                            LFB = i&0xf
+                            
                             raw = self.ser.read(2)
-                            val = int.from_bytes(raw, 'little', signed=True)
+
+                            val =  ((int.from_bytes(raw, 'little', signed=True) * 25)/32768)
+                            
+                            print(f"converted: {val}")
                             row.append(val)
                         writer.writerow(row)
                         #self.log(f"Control Data: {', '.join(map(str, row))}")
@@ -215,8 +220,6 @@ class SpatialFogDataRecorder:
     
     def initialize(self):
         self.log("Checking Spatial FOG device...")
-   
-
         try:
             test_spatial = spatial_device.Spatial(self.comport, self.baudrate)
             test_spatial.start()
@@ -256,7 +259,6 @@ class SpatialFogDataRecorder:
             messagebox.showerror("Device Error", f"Error initializing Spatial FOG:\n{e}. \rCheck if device is connected!")
             return False
             
-        
 
     def start_acquisition(self, filename):
         
@@ -270,9 +272,7 @@ class SpatialFogDataRecorder:
           # Creates log file for received binary data from device
           now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
           logFile = open(f"{filename}.anpp", 'xb')
-    
-          #an_packet = ANPacket()
-    
+
           # Sets sensor ranges
           spatial.set_sensor_ranges(True,
                                     spatial_device.AccelerometerRange.accelerometer_range_4g,
