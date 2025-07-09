@@ -22,25 +22,98 @@ class AppGUI:
         self.data_recorder1 = data_recorder1
         self.data_recorder2 = data_recorder2
         self.root.title("FAA Flight Test Sensor Data Recorder")
-
+     
+        # === LEFT SIDE ===
+     
         # Filename entry
         tk.Label(root, text="Filename:").grid(row=0, column=0, padx=(10, 2), pady=5, sticky='e')
         self.filename_entry = tk.Entry(root, width=40)
-        self.filename_entry.grid(row=0, column=1, columnspan=3, padx=(2, 10), pady=5, sticky='w')
-        self.filename_entry.insert(0, f"Write filename here")
-
-        # Log box (scrolled text)
-        self.log_box = scrolledtext.ScrolledText(root, width=75, height=20, state='disabled')
-        self.log_box.grid(row=2, column=0, columnspan=4, padx=10, pady=10)
-
-        # Buttons
-        tk.Button(root, text="Start", command=self.start_acquisition, width=15).grid(row=1, column=0, padx=10, pady=10)
-        tk.Button(root, text="Stop", command=self.stop_acquisition, width=15).grid(row=1, column=1, padx=10, pady=10)
-        tk.Button(root, text="Quit", command= lambda: root.destroy(), width=15).grid(row=1, column=3, padx=10, pady=10)
-        
+        self.filename_entry.grid(row=0, column=1, columnspan=2, padx=(2, 10), pady=5, sticky='w')
+     
+        # LED indicator
         self.led = tk.Canvas(root, width=25, height=25, highlightthickness=0)
         self.led.grid(row=0, column=3, padx=10, pady=10)
         self.led_circle = self.led.create_oval(2, 2, 22, 22, fill="gray")
+     
+        # Buttons
+        tk.Button(root, text="Start", command=self.start_acquisition, width=15).grid(row=1, column=0, padx=10, pady=10)
+        tk.Button(root, text="Stop", command=self.stop_acquisition, width=15).grid(row=1, column=1, padx=10, pady=10)
+        tk.Button(root, text="Quit", command=lambda: root.destroy(), width=15).grid(row=1, column=3, padx=10, pady=10)
+     
+        # Log box
+        self.log_box = scrolledtext.ScrolledText(root, width=75, height=20, state='disabled')
+        self.log_box.grid(row=2, column=0, columnspan=4, padx=10, pady=10)
+     
+        # === RIGHT SIDE GROUP ===
+        self.visuals_frame = tk.Frame(root)
+        self.visuals_frame.grid(row=0, column=4, rowspan=6, padx=(20, 20), pady=10, sticky='ns')
+        
+        # Pitch/Roll
+        tk.Label(self.visuals_frame, text="Pitch / Roll").grid(row=0, column=0, pady=(0, 5))
+        self.pitchroll_canvas = tk.Canvas(self.visuals_frame, width=120, height=120, bg='white', highlightthickness=0)
+        #self.pitchroll_canvas.pack(pady=(5, 20))
+        self.pitchroll_canvas.grid(row=1, column=0, pady=(0, 20))
+        self.pitchroll_canvas.create_rectangle(0, 0, 120, 120, width=2)
+        self.pitchroll_canvas.create_line(60, 0, 60, 120, width=1)
+        self.pitchroll_canvas.create_line(0, 60, 120, 60, width=1)
+        self.pitchroll_dot = self.pitchroll_canvas.create_oval(55, 55, 65, 65, fill='red')
+        
+        # Collective
+        tk.Label(self.visuals_frame, text="Collective").grid(row=2, column=0)
+        self.collective_canvas = tk.Canvas(self.visuals_frame, width=200, height=40, bg='white', highlightthickness=0)
+        self.collective_canvas.grid(row=3, column=0, pady=(5, 20))
+        self.collective_canvas.create_rectangle(0, 0, 200, 40, width=2)
+        self.collective_canvas.create_line(100, 0, 100, 40, width=1, dash=(4, 2))  # Vertical center line
+        self.collective_dot = self.collective_canvas.create_oval(95, 10, 105, 30, fill='red')
+        
+        # Pedals
+        tk.Label(self.visuals_frame, text="Pedals").grid(row=4, column=0)
+        self.pedal_canvas = tk.Canvas(self.visuals_frame, width=200, height=40, bg='white', highlightthickness=0)
+        self.pedal_canvas.grid(row=5, column=0, pady=(5, 10))
+        self.pedal_canvas.create_rectangle(0, 0, 200, 40, width=2)
+        self.pedal_canvas.create_line(100, 0, 100, 40, width=1, dash=(4, 2))  # Vertical center line
+        self.pedal_dot = self.pedal_canvas.create_oval(95, 10, 105, 30, fill='red')
+     
+        self.root.update()
+        self.root.minsize(self.root.winfo_width(), self.root.winfo_height())
+    
+    def UpdateSensorVisualization(self, cylcic_pitch, cyclic_roll, collective, pedals):
+        """
+        
+
+        Parameters
+        ----------
+        cylic_pitch : TYPE
+            DESCRIPTION.
+        cyclic_roll : TYPE
+            DESCRIPTION.
+        collective : TYPE
+            DESCRIPTION.
+        pedals : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        #0 - 15v on far right side
+        cyclic_pitch_clamped =  max(0, min(15, cylcic_pitch))
+        cyclic_roll_clamped =  max(0, min(15, cyclic_roll))
+        collective_clamped =  max(0, min(15, collective))
+        pedals_clamped =  max(0, min(15, pedals))
+        
+        cyclic_x = (cyclic_roll_clamped / 15) * 120
+        cyclic_y = 120 - (cyclic_pitch_clamped / 15) * 120
+        collective_x = (collective_clamped / 15) * 200
+        pedals_x = (pedals_clamped / 15) * 200
+        
+        self.pitchroll_canvas.coords(self.pitchroll_dot, cyclic_x - 5, cyclic_y - 5, cyclic_x + 5, cyclic_y + 5)
+        
+        self.collective_canvas.coords(self.collective_dot, collective_x - 5, 10, collective_x + 5, 30)
+        self.pedal_canvas.coords(self.pedal_dot, pedals_x - 5, 10, pedals_x + 5, 30)
+
         
     def log(self, msg):
         timestamp = datetime.now().strftime('%H:%M:%S')
@@ -77,8 +150,9 @@ class AppGUI:
     
 
 class DIDataRecorder:
-    def __init__(self, log_callback):
+    def __init__(self, log_callback, gui_ref=None):
         self. heartbeat_interval = 5  # seconds
+        self.gui = gui_ref #placeholder for the root reference
         self.ser = serial.Serial()
         self.acquiring = False
         self.stop_event = threading.Event()
@@ -151,7 +225,7 @@ class DIDataRecorder:
             self.log("Already acquiring.")
             return
         if not self.ser.is_open:
-            self.log("Spatial FOG not connected.")
+            self.log("DI-2008 not connected.")
             return
         self.acquiring = True
         self.stop_event.clear()
@@ -170,6 +244,11 @@ class DIDataRecorder:
     
 
     def acquire_data(self, filename):
+        pitch_val = 7
+        roll_val = 7
+        pedal_val = 7
+        collective_val = 7
+        
         try:
             self.send_cmd("start")
             with open(filename, "w", newline="") as file:
@@ -183,16 +262,28 @@ class DIDataRecorder:
                     if self.ser.in_waiting >= 2 * len(self.slist):
                         row = [datetime.now().strftime('%H:%M:%S')]
                         for i in self.slist:
-                            LFB = i&0xf
-                            
+                            #LFB = i&0xf
                             raw = self.ser.read(2)
-
                             val =  ((int.from_bytes(raw, 'little', signed=True) * 25)/32768)
                             
-                            print(f"converted: {val}")
+                            match i:
+                                case 2304: #pitch
+                                    
+                                    pitch_val = val
+                                case 2305: #pedal
+                                    pedal_val = val
+                                case 2306: #collective
+                                    collective_val = val
+                                case 2307: #roll
+                                    roll_val = val
+                                case _:
+                                    print(f"no match: {i}")
+                            
+                            
                             row.append(val)
+                        
                         writer.writerow(row)
-                        #self.log(f"Control Data: {', '.join(map(str, row))}")
+                        self.gui.UpdateSensorVisualization(pitch_val, roll_val, collective_val, pedal_val)
                     
                     if time.time() - last_heartbeat >= self.heartbeat_interval:
                        self.log(f"{row[0]} DI-2008: Heartbeat")
@@ -351,7 +442,7 @@ if __name__ == "__main__":
     
 
     
-
+    DIrecorder.gui = gui
     DIrecorder.log = gui.log  # assign log callback after GUI init.
     SpatialRecorder.log = gui.log
         
