@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
+from tkinter import ttk, scrolledtext
 from datetime import datetime
 import serial
 import serial.tools.list_ports
@@ -8,7 +9,9 @@ import time
 import csv
 import sys
 import math
-
+import queue
+import os
+import tomli
 import an_devices.spatial_device as spatial_device
 from anpp_packets.an_packet_protocol import ANPacket
 from anpp_packets.an_packets import PacketID
@@ -17,66 +20,115 @@ from anpp_packets.an_packets import PacketID
 
 
 class AppGUI:
-    def __init__(self, root, data_recorder1, data_recorder2):
+    def __init__(self, root, IOHelper, data_recorder1, data_recorder2):
         self.root = root
         self.data_recorder1 = data_recorder1
         self.data_recorder2 = data_recorder2
         self.root.title("FAA Flight Test Sensor Data Recorder")
-     
-        # === LEFT SIDE ===
-     
-        # Filename entry
-        tk.Label(root, text="Filename:").grid(row=0, column=0, padx=(10, 2), pady=5, sticky='e')
+        
+        # Initialize files
+        self.IOHelper = IOHelper
+        
+        # === FILENAME & LED ===
+        tk.Label(root, text="Filename:").grid(row=0, column=0, padx=(0, 2), pady=5, sticky='e')
         self.filename_entry = tk.Entry(root, width=40)
         self.filename_entry.grid(row=0, column=1, columnspan=2, padx=(2, 10), pady=5, sticky='w')
-     
-        # LED indicator
+        
         self.led = tk.Canvas(root, width=25, height=25, highlightthickness=0)
         self.led.grid(row=0, column=3, padx=10, pady=10)
         self.led_circle = self.led.create_oval(2, 2, 22, 22, fill="gray")
-     
-        # Buttons
+        
+        # === BUTTONS ===
         tk.Button(root, text="Start", command=self.start_acquisition, width=15).grid(row=1, column=0, padx=10, pady=10)
         tk.Button(root, text="Stop", command=self.stop_acquisition, width=15).grid(row=1, column=1, padx=10, pady=10)
         tk.Button(root, text="Quit", command=lambda: root.destroy(), width=15).grid(row=1, column=3, padx=10, pady=10)
-     
-        # Log box
-        self.log_box = scrolledtext.ScrolledText(root, width=75, height=20, state='disabled')
-        self.log_box.grid(row=2, column=0, columnspan=4, padx=10, pady=10)
-     
-        # === RIGHT SIDE GROUP ===
+        
+        # === LOG BOX ===
+        self.log_box = scrolledtext.ScrolledText(root, width=75, height=15, state='disabled')
+        self.log_box.grid(row=2, column=0, columnspan=4, padx=10, pady=(5, 0))
+        
+        # === COMMENT SECTION ===
+        self.comment_entry = tk.Entry(root, width=60)
+        self.comment_entry.grid(row=3, column=0, columnspan=2, padx=(10, 5), pady=(5, 10), sticky='w')
+        
+        self.comment_time = tk.StringVar()
+        self.comment_time.set("Time")
+        tk.Button(root, textvariable=self.comment_time, command=self.capture_time, width=10).grid(row=3, column=2, pady=(5, 10))
+        tk.Button(root, text="Submit Comment", command=self.submit_comment, width=15).grid(row=3, column=3, padx=(5, 10), pady=(5, 10))
+        
+        # === MANEUVER SECTION (moved below log box) ===
+        self.maneuver_frame = tk.Frame(root)
+        self.maneuver_frame.grid(row=4, column=0, columnspan=4, padx=10, pady=(0, 10), sticky='w')
+        
+        tk.Label(self.maneuver_frame, text="Maneuver:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky='e')
+        self.maneuver_var = tk.StringVar()
+        self.maneuver_combobox = ttk.Combobox(self.maneuver_frame, textvariable=self.maneuver_var, values=["Hover", "Climb", "Descent", "Turn", "Autorotation"], width=35)
+        self.maneuver_combobox.grid(row=0, column=1, padx=(0, 10), pady=5, sticky='w')
+        
+        self.maneuver_start_button = tk.Button(self.maneuver_frame, text="Start Maneuver", width=15, command=self.start_maneuver)
+        self.maneuver_start_button.grid(row=0, column=2, padx=5, pady=5)
+        self.maneuver_stop_button = tk.Button(self.maneuver_frame, text="Stop Maneuver", width=15, command=self.stop_maneuver)
+        self.maneuver_stop_button.grid(row=0, column=3, padx=5, pady=5)
+        
+        # === RIGHT SIDE VISUALIZATION ===
         self.visuals_frame = tk.Frame(root)
         self.visuals_frame.grid(row=0, column=4, rowspan=6, padx=(20, 20), pady=10, sticky='ns')
         
         # Pitch/Roll
         tk.Label(self.visuals_frame, text="Pitch / Roll").grid(row=0, column=0, pady=(0, 5))
         self.pitchroll_canvas = tk.Canvas(self.visuals_frame, width=120, height=120, bg='white', highlightthickness=0)
-        #self.pitchroll_canvas.pack(pady=(5, 20))
         self.pitchroll_canvas.grid(row=1, column=0, pady=(0, 20))
         self.pitchroll_canvas.create_rectangle(0, 0, 120, 120, width=2)
         self.pitchroll_canvas.create_line(60, 0, 60, 120, width=1)
         self.pitchroll_canvas.create_line(0, 60, 120, 60, width=1)
-        self.pitchroll_dot = self.pitchroll_canvas.create_oval(55, 55, 65, 65, fill='red')
+        self.pitchroll_dot = self.pitchroll_canvas.create_oval(55, 55, 65, 65, fill='green')
         
         # Collective
         tk.Label(self.visuals_frame, text="Collective").grid(row=2, column=0)
         self.collective_canvas = tk.Canvas(self.visuals_frame, width=200, height=40, bg='white', highlightthickness=0)
         self.collective_canvas.grid(row=3, column=0, pady=(5, 20))
         self.collective_canvas.create_rectangle(0, 0, 200, 40, width=2)
-        self.collective_canvas.create_line(100, 0, 100, 40, width=1, dash=(4, 2))  # Vertical center line
-        self.collective_dot = self.collective_canvas.create_oval(95, 10, 105, 30, fill='red')
+        self.collective_canvas.create_line(100, 0, 100, 40, width=1, dash=(4, 2))
+        self.collective_dot = self.collective_canvas.create_oval(95, 10, 105, 30, fill='green')
         
         # Pedals
         tk.Label(self.visuals_frame, text="Pedals").grid(row=4, column=0)
         self.pedal_canvas = tk.Canvas(self.visuals_frame, width=200, height=40, bg='white', highlightthickness=0)
         self.pedal_canvas.grid(row=5, column=0, pady=(5, 10))
         self.pedal_canvas.create_rectangle(0, 0, 200, 40, width=2)
-        self.pedal_canvas.create_line(100, 0, 100, 40, width=1, dash=(4, 2))  # Vertical center line
-        self.pedal_dot = self.pedal_canvas.create_oval(95, 10, 105, 30, fill='red')
-     
+        self.pedal_canvas.create_line(100, 0, 100, 40, width=1, dash=(4, 2))
+        self.pedal_dot = self.pedal_canvas.create_oval(95, 10, 105, 30, fill='green')
+        
         self.root.update()
         self.root.minsize(self.root.winfo_width(), self.root.winfo_height())
+
+    def capture_time(self):
+        current_time = datetime.now().strftime("%H:%M:%S")
+        self.comment_time.set(current_time)
+
+    def submit_comment(self):
+        timestamp = self.comment_time.get()
+        comment = self.comment_entry.get().strip()
+        if comment:
+            self.log(f"[COMMENT] {timestamp} - {comment}")
+            self.comment_entry.delete(0, tk.END)
+            self.comment_time.set("Time")
+
+    def start_maneuver(self):
+        maneuver = self.maneuver_var.get()
+        if maneuver:
+            self.log(f"Maneuver started: {maneuver}")
+
+    def stop_maneuver(self):
+        maneuver = self.maneuver_var.get()
+        if maneuver:
+            self.log(f"Maneuver stopped: {maneuver}")
+
     
+    def ImportFileConfig(self):
+        status1, status2 = self.IOHelper.InitializeParameters()
+        
+
     def UpdateSensorVisualization(self, cylcic_pitch, cyclic_roll, collective, pedals):
         """
         
@@ -415,6 +467,90 @@ class SpatialFogDataRecorder:
 
         self.log("Stop pressed. Spatial Acquisition stopped.")
         self.ser.close()
+        
+class IOHelper:
+    """
+        Helper function for file creation and management
+    """
+    
+    def __init__ (self, root): #intance will pass in root variable
+        self.dataParameter_Lookup = {}
+        self.blankOutputFileHeader = {}
+        self.pilot_Lookup = []
+        self.block_Lookup = []
+        self.lesson_Lookup = []
+        self.maneuver_Lookup = []
+        self.initialized = False
+        self.simPaused = False
+        self.outputDict = {key: '' for key in self.blankOutputFileHeader} #create blank output dictionary for processing replies from server
+        self.outputFile = None
+        self.writer = None
+        self.call_count = 0 #Will be used to print a heartbeat message to the console every so many calls
+        self.heartbeat_message_interval = 50 #Every 50 lines it will print a heartbeat message to the console
+        self.que = queue.Queue() #make a quene for comments/manuever info. Only one instance of this class is called
+                            #so this queue will be checked when writing rows
+        self.root = root
+        
+        root.protocol("WM_DELETE_WINDOW", lambda: self.OnClose())
+
+        
+        
+    def GetPilots(self):
+        return self.pilot_Lookup;
+    
+    def GetBlocks(self):
+        return self.block_Lookup
+    
+    def GetLessons(self):
+        return self.lesson_Lookup
+    
+    def InitializeParameters(self):
+        """
+        Imports required config files 
+        
+        Returns
+        -------
+         Returns two status items. One for each config toml
+        """
+        lesson_status = self._ImportLessonToml()
+        param_status = self._ImportParameterToml()
+        
+        if lesson_status and param_status == 1:   
+            self.initialized = True
+            #file = self._CreateFile(self.blankOutputFileHeader)
+            return lesson_status, param_status
+        
+        return lesson_status, param_status
+        
+    def _ImportLessonToml(self):
+        """
+        Private function that imports the lesson toml config for parameters from loft sim
+
+        Returns
+        -------
+        1 if successful, 0 if not successful
+
+        """
+        try: 
+            dirname = os.path.abspath(os.getcwd())
+            filename = dirname + '\\config\\lessonconfig.toml'
+            toml = open(filename, "rb")
+            
+            toml_dict = tomli.load(toml)['lessonconfig']
+            
+            for value in toml_dict:
+                if value == "pilots": 
+                    for i in toml_dict[value]:
+                        self.pilot_Lookup.append(i) #add each pilot to the lookup table
+
+                if value == "maneuvers":
+                    for i in toml_dict[value]:
+                        self.maneuver_Lookup.append(i) #add each pilot to the lookup table
+                     
+            return 1
+        except: 
+            return 0
+
 
 def MasterCloseSerial(instanceOne, instanceTwo):
     """
@@ -430,6 +566,7 @@ def MasterCloseSerial(instanceOne, instanceTwo):
     instanceTwo.ser.close()
     root.destroy()
     sys.exit()
+    
 
 if __name__ == "__main__":
     
@@ -438,7 +575,8 @@ if __name__ == "__main__":
     
     DIrecorder = DIDataRecorder(log_callback=lambda msg: gui.log(msg))  # placeholder, will reassign after gui created
     SpatialRecorder = SpatialFogDataRecorder(log_callback=lambda msg: gui.log(msg))
-    gui = AppGUI(root, DIrecorder, SpatialRecorder)
+    IOHelper = IOHelper(root)
+    gui = AppGUI(root, IOHelper, DIrecorder, SpatialRecorder)
     
 
     
