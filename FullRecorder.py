@@ -221,7 +221,6 @@ class AppGUI:
 
         
         #this will need to pass filenames over once I get it set up properly
-        print("lorem")
     def stop_acquisition(self):
         self.led.itemconfigure(self.led_circle, fill="gray")
         self.data_recorder1.stop_acquisition()
@@ -505,36 +504,43 @@ class SpatialFogDataRecorder:
         
 class ManueverRecorder:
     def __init__(self, IOHelper, log_callback):
-        print("meow")
+
         self.message_que = IOHelper.comment_que
         self.acquiring = False
         self.stop_event = threading.Event()
-        self.writer = None
-        self.logFile = None
         self.log = log_callback
+        
     def _process_thread(self, filename):
         print("STARTING MANEUVER LOGGING")
+        
         logFile = open(f"{filename}", 'w')
-        writer = csv.writer(self.logFile)
+        writer = csv.writer(logFile)
         writer.writerow(["Time"] + ["Maneuver/Comments"])
         
         while not self.stop_event.is_set():
-           print("looping within stop event")
+
            try:
                # Default is blocking with no timeout
                message = self.message_que.get(block=True, timeout=None)
-
+               if (message == "END"):
+                   break
+               
+               print(message)
                message_time = message.split("_")[0]
                message = "_".join(message.split("_")[1:])
                 
-               row = [message_time] + [message]
+               row = [message_time, message]
                writer.writerow(row)
                print(f"Writing message: {row}")
                
            except Exception as e:
                self.log(f"Process maneuver error: {e}")
+               print(f"ERROR: {e}")
+    
         logFile.close()
+        
         print("log file closed")
+        
     def start_acquisition(self, filename):        
         self.acquiring = True
         self.stop_event.clear()
@@ -543,10 +549,7 @@ class ManueverRecorder:
     def stop_acquisition(self):
         self.acquiring = False
         self.stop_event.set()
-        
-          
-    def CreateFile(self):
-        print("meow")
+        self.message_que.put("END")
         
 class IOHelper:
     """
