@@ -115,11 +115,14 @@ class AppGUI:
         self.comment_time.set(current_time)
 
     def submit_comment(self):
-        timestamp = self.comment_time.get("1.0", tk.END)
+        timestamp = self.comment_time.get()
         comment = self.comment_entry.get("1.0", tk.END)
         if comment:
-            self.log(f"[COMMENT] {timestamp} - {comment}")
-            IOHelper.comment_que.put(comment)
+            
+            que_message = f"{timestamp}_COMMENT_{comment}"
+            self.log(f"{que_message}")
+            
+            IOHelper.comment_que.put(que_message)
             self.comment_entry.delete("1.0", tk.END)
             self.comment_time.set("Time")
 
