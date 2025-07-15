@@ -20,10 +20,12 @@ from anpp_packets.an_packets import PacketID
 
 
 class AppGUI:
-    def __init__(self, root, IOHelper, data_recorder1, data_recorder2):
+    def __init__(self, root, IOHelper, data_recorder1, data_recorder2, data_recorder3):
         self.root = root
         self.data_recorder1 = data_recorder1
         self.data_recorder2 = data_recorder2
+        self.data_recorder3 = data_recorder3
+        
         self.root.title("FAA Flight Test Sensor Data Recorder")
      
         # Initialize files
@@ -101,44 +103,52 @@ class AppGUI:
      
         self.root.update()
         self.root.minsize(self.root.winfo_width(), self.root.winfo_height())
+        
+        status = IOHelper.InitializeParameters()
+        if status == 1:
+            self.UpdateComboBox()
+        elif status == 0:
+            self.log("Error loading files")
 
     def capture_time(self):
         current_time = datetime.now().strftime("%H:%M:%S")
         self.comment_time.set(current_time)
 
     def submit_comment(self):
-        timestamp = self.comment_time.get()
-        comment = self.comment_entry.get("1.0", tk.END).strip()
+        timestamp = self.comment_time.get("1.0", tk.END)
+        comment = self.comment_entry.get("1.0", tk.END)
         if comment:
             self.log(f"[COMMENT] {timestamp} - {comment}")
+            IOHelper.comment_que.put(comment)
             self.comment_entry.delete("1.0", tk.END)
-            self.comment_time.set("Time")
-
-    def capture_time(self):
-        current_time = datetime.now().strftime("%H:%M:%S")
-        self.comment_time.set(current_time)
-
-    def submit_comment(self):
-        timestamp = self.comment_time.get()
-        comment = self.comment_entry.get().strip()
-        if comment:
-            self.log(f"[COMMENT] {timestamp} - {comment}")
-            self.comment_entry.delete(0, tk.END)
             self.comment_time.set("Time")
 
     def start_maneuver(self):
         maneuver = self.maneuver_var.get()
-        if maneuver:
+        current_time = datetime.now().strftime("%H:%M:%S")
+        
+        if (maneuver != ""):
             self.log(f"Maneuver started: {maneuver}")
-
+            que_message = f"MANEUVER_{current_time} - START_{maneuver}"
+            print(que_message)
+            IOHelper.comment_que.put(que_message)
+        else:
+            self.log("No maneuver selected!")
+            
     def stop_maneuver(self):
         maneuver = self.maneuver_var.get()
-        if maneuver:
+        current_time = datetime.now().strftime("%H:%M:%S")
+        
+        if (maneuver != "") :
             self.log(f"Maneuver stopped: {maneuver}")
-
-    
-    def ImportFileConfig(self):
-        status1, status2 = self.IOHelper.InitializeParameters()
+            que_message = f"MANEUVER_{current_time} - STOP_{maneuver}"
+            IOHelper.comment_que.put(que_message)
+        else:
+            self.log("No maneuver selected!")
+            
+            
+    def UpdateComboBox(self):
+        self.maneuver_combobox["values"] = self.IOHelper.maneuver_Lookup
         
 
     def UpdateSensorVisualization(self, cylcic_pitch, cyclic_roll, collective, pedals):
@@ -196,13 +206,19 @@ class AppGUI:
         
     def start_acquisition(self):
         self.led.itemconfigure(self.led_circle, fill="green")
-        DIfilename = "ControlPos_" + self.get_filename()
-        if not DIfilename.lower().endswith(".csv"):
-            DIfilename += ".csv"
+        
+        dirname = os.path.abspath(os.getcwd())
+        filepath = dirname + '\\data\\'
+          
+        DIfilename = filepath + "ControlPos_" + self.get_filename() + ".csv"
+        
         threading.Thread(target=self.data_recorder1.start_acquisition, args = (DIfilename,), daemon=True).start()
         
-        SpatialFileName = "SpatialFOG_" + self.get_filename()
+        SpatialFileName = filepath + "SpatialFOG_" + self.get_filename() + ".anpp"
         threading.Thread(target=self.data_recorder2.start_acquisition, args = (SpatialFileName,), daemon=True).start()
+
+        ManeuverFileName = filepath + "ManeuverLog_" + self.get_filename() + ".csv"
+        threading.Thread(target=self.data_recorder3.start_acquisition, args = (ManeuverFileName,), daemon=True).start()
 
         
         #this will need to pass filenames over once I get it set up properly
@@ -425,8 +441,9 @@ class SpatialFogDataRecorder:
           spatial.flush()
           
           # Creates log file for received binary data from device
-          now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-          logFile = open(f"{filename}.anpp", 'xb')
+          dirname = os.path.abspath(os.getcwd())
+          
+          logFile = open(f"{filename}", 'xb')
 
           # Sets sensor ranges
           spatial.set_sensor_ranges(True,
@@ -480,6 +497,35 @@ class SpatialFogDataRecorder:
         self.log("Stop pressed. Spatial Acquisition stopped.")
         self.ser.close()
         
+class ManueverRecorder:
+    def __init__(self, IOHelper):
+        print("meow")
+        self.message_que = IOHelper.comment_que
+        self.acquiring = False
+        self.stop_event = threading.Event()
+        
+    
+    def ProcessQueListener(self, logfile):
+        while not self.message_que.empty():
+           try:
+               # Default is blocking with no timeout
+               message = self.message_que.get(block=True, timeout=None)
+               message_type = message.split("_")[0]
+               log_message = None
+               
+               row = [datetime.now().strftime('%H:%M:%S')] + [message]
+               print(row) 
+           except Exception as e:
+               self.log(f"Process maneuver error: {e}")
+    
+    def start_acquisition(self, filename):
+          logFile = open(f"{filename}", 'w')
+          writer = csv.writer(logFile)
+          writer.writerow(["Time"] + ["Maneuver/Comments"])
+          
+    def CreateFile(self):
+        print("meow")
+        
 class IOHelper:
     """
         Helper function for file creation and management
@@ -492,11 +538,9 @@ class IOHelper:
         self.simPaused = False
         self.writer = None
         self.call_count = 0 #Will be used to print a heartbeat message to the console every so many calls
-        self.heartbeat_message_interval = 50 #Every 50 lines it will print a heartbeat message to the console
-        self.que = queue.Queue() #make a quene for comments/manuever info. Only one instance of this class is called
-                            #so this queue will be checked when writing rows
+        self.heartbeat_message_interval = 50 #Every 50 lines it will print a heartbeat message to the console                            #so this queue will be checked when writing rows
         self.root = root
-        
+        self.comment_que = queue.Queue()
         root.protocol("WM_DELETE_WINDOW", lambda: self.OnClose())
 
         
@@ -519,14 +563,13 @@ class IOHelper:
          Returns two status items. One for each config toml
         """
         lesson_status = self._ImportLessonToml()
-        param_status = self._ImportParameterToml()
         
-        if lesson_status and param_status == 1:   
+        if lesson_status == 1:   
             self.initialized = True
             #file = self._CreateFile(self.blankOutputFileHeader)
-            return lesson_status, param_status
+            return lesson_status
         
-        return lesson_status, param_status
+        return lesson_status
         
     def _ImportLessonToml(self):
         """
@@ -579,7 +622,9 @@ if __name__ == "__main__":
     DIrecorder = DIDataRecorder(log_callback=lambda msg: gui.log(msg))  # placeholder, will reassign after gui created
     SpatialRecorder = SpatialFogDataRecorder(log_callback=lambda msg: gui.log(msg))
     IOHelper = IOHelper(root)
-    gui = AppGUI(root, IOHelper, DIrecorder, SpatialRecorder)
+    ManueverRecorder = ManueverRecorder(IOHelper)
+    
+    gui = AppGUI(root, IOHelper, DIrecorder, SpatialRecorder, ManueverRecorder)
     
 
     
