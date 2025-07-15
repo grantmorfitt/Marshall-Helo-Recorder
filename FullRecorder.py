@@ -129,7 +129,7 @@ class AppGUI:
         
         if (maneuver != ""):
             self.log(f"Maneuver started: {maneuver}")
-            que_message = f"MANEUVER_{current_time} - START_{maneuver}"
+            que_message = f"{current_time}_MANEUVER_START_{maneuver}"
             print(que_message)
             IOHelper.comment_que.put(que_message)
         else:
@@ -141,7 +141,7 @@ class AppGUI:
         
         if (maneuver != "") :
             self.log(f"Maneuver stopped: {maneuver}")
-            que_message = f"MANEUVER_{current_time} - STOP_{maneuver}"
+            que_message = f"{current_time}_MANEUVER_STOP_{maneuver}"
             IOHelper.comment_que.put(que_message)
         else:
             self.log("No maneuver selected!")
@@ -211,14 +211,13 @@ class AppGUI:
         filepath = dirname + '\\data\\'
           
         DIfilename = filepath + "ControlPos_" + self.get_filename() + ".csv"
-        
-        threading.Thread(target=self.data_recorder1.start_acquisition, args = (DIfilename,), daemon=True).start()
+        self.data_recorder1.start_acquisition(DIfilename)
         
         SpatialFileName = filepath + "SpatialFOG_" + self.get_filename() + ".anpp"
-        threading.Thread(target=self.data_recorder2.start_acquisition, args = (SpatialFileName,), daemon=True).start()
+        self.data_recorder2.start_acquisition(SpatialFileName)
 
         ManeuverFileName = filepath + "ManeuverLog_" + self.get_filename() + ".csv"
-        threading.Thread(target=self.data_recorder3.start_acquisition, args = (ManeuverFileName,), daemon=True).start()
+        self.data_recorder3.start_acquisition(ManeuverFileName)
 
         
         #this will need to pass filenames over once I get it set up properly
@@ -227,6 +226,7 @@ class AppGUI:
         self.led.itemconfigure(self.led_circle, fill="gray")
         self.data_recorder1.stop_acquisition()
         self.data_recorder2.stop_acquisition()
+        self.data_recorder3.stop_acquisition()
     
 
 class DIDataRecorder:
@@ -307,10 +307,15 @@ class DIDataRecorder:
         if not self.ser.is_open:
             self.log("DI-2008 not connected.")
             return
+        
+        self._process_thread(filename)
+
+    def _process_thread(self, filename):
         self.acquiring = True
         self.stop_event.clear()
         threading.Thread(target=self.acquire_data, args=(filename,), daemon=True).start()
         self.log("Start pressed. Acquisition started.")
+
 
     def stop_acquisition(self):
         if not self.acquiring:
@@ -338,7 +343,7 @@ class DIDataRecorder:
                 last_heartbeat = time.time()
 
            
-                while self.acquiring and not self.stop_event.is_set():
+                while not self.stop_event.is_set():
                     if self.ser.in_waiting >= 2 * len(self.slist):
                         row = [datetime.now().strftime('%H:%M:%S')]
                         for i in self.slist:
@@ -348,7 +353,6 @@ class DIDataRecorder:
                             
                             match i:
                                 case 2304: #pitch
-                                    
                                     pitch_val = val
                                 case 2305: #pedal
                                     pedal_val = val
@@ -430,19 +434,21 @@ class SpatialFogDataRecorder:
             messagebox.showerror("Device Error", f"Error initializing Spatial FOG:\n{e}. \rCheck if device is connected!")
             return False
             
-
-    def start_acquisition(self, filename):
+    def start_acquisition(self, SpatialFileName):
+        self.acquiring = True
+        self.stop_event.clear()
+        threading.Thread(target=self._process_thread, args = (SpatialFileName,), daemon=True).start()
+        
+    def _process_thread(self, filename):
         
         spatial = spatial_device.Spatial(self.comport, self.baudrate)
         spatial.start()
         
         if spatial.is_open:
-          print(f"Connected to port:{spatial.port} with baud:{spatial.baud}")
+          print(f"Spatial FOG connected to port:{spatial.port} with baud:{spatial.baud}")
           spatial.flush()
           
-          # Creates log file for received binary data from device
-          dirname = os.path.abspath(os.getcwd())
-          
+          # Creates log file for received binary data from device          
           logFile = open(f"{filename}", 'xb')
 
           # Sets sensor ranges
@@ -457,7 +463,7 @@ class SpatialFogDataRecorder:
           
           self.acquiring = True
           try:
-              while spatial.is_open:
+              while spatial.is_open and not self.stop_event.is_set():
                   if spatial.in_waiting() > 0:
                       if not self.stop_event.is_set():
                           # Get bytes in serial buffer
@@ -472,11 +478,11 @@ class SpatialFogDataRecorder:
                              
                              
                           #self.log(datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + " Spatial Record Bytes")
-                      else:
-                          logFile.close()
-                          self.acquiring = False
-                          self.log(f"Spatial Data written to {filename}")
-                          break;
+                      
+              logFile.close()
+              self.acquiring = False
+              self.log(f"Spatial Data written to {filename}")
+
           except Exception as e:
               self.log(f"Spatial FOG Error: {e}")       
               
@@ -498,30 +504,46 @@ class SpatialFogDataRecorder:
         self.ser.close()
         
 class ManueverRecorder:
-    def __init__(self, IOHelper):
+    def __init__(self, IOHelper, log_callback):
         print("meow")
         self.message_que = IOHelper.comment_que
         self.acquiring = False
         self.stop_event = threading.Event()
+        self.writer = None
+        self.logFile = None
+        self.log = log_callback
+    def _process_thread(self, filename):
+        print("STARTING MANEUVER LOGGING")
+        logFile = open(f"{filename}", 'w')
+        writer = csv.writer(self.logFile)
+        writer.writerow(["Time"] + ["Maneuver/Comments"])
         
-    
-    def ProcessQueListener(self, logfile):
-        while not self.message_que.empty():
+        while not self.stop_event.is_set():
+           print("looping within stop event")
            try:
                # Default is blocking with no timeout
                message = self.message_que.get(block=True, timeout=None)
-               message_type = message.split("_")[0]
-               log_message = None
+
+               message_time = message.split("_")[0]
+               message = "_".join(message.split("_")[1:])
+                
+               row = [message_time] + [message]
+               writer.writerow(row)
+               print(f"Writing message: {row}")
                
-               row = [datetime.now().strftime('%H:%M:%S')] + [message]
-               print(row) 
            except Exception as e:
                self.log(f"Process maneuver error: {e}")
+        logFile.close()
+        print("log file closed")
+    def start_acquisition(self, filename):        
+        self.acquiring = True
+        self.stop_event.clear()
+        threading.Thread(target=self._process_thread, args = (filename,), daemon=True).start()
     
-    def start_acquisition(self, filename):
-          logFile = open(f"{filename}", 'w')
-          writer = csv.writer(logFile)
-          writer.writerow(["Time"] + ["Maneuver/Comments"])
+    def stop_acquisition(self):
+        self.acquiring = False
+        self.stop_event.set()
+        
           
     def CreateFile(self):
         print("meow")
@@ -622,7 +644,7 @@ if __name__ == "__main__":
     DIrecorder = DIDataRecorder(log_callback=lambda msg: gui.log(msg))  # placeholder, will reassign after gui created
     SpatialRecorder = SpatialFogDataRecorder(log_callback=lambda msg: gui.log(msg))
     IOHelper = IOHelper(root)
-    ManueverRecorder = ManueverRecorder(IOHelper)
+    ManueverRecorder = ManueverRecorder(IOHelper, log_callback=lambda msg: gui.log(msg))
     
     gui = AppGUI(root, IOHelper, DIrecorder, SpatialRecorder, ManueverRecorder)
     
@@ -631,7 +653,7 @@ if __name__ == "__main__":
     DIrecorder.gui = gui
     DIrecorder.log = gui.log  # assign log callback after GUI init.
     SpatialRecorder.log = gui.log
-        
+    ManueverRecorder.log = gui.log
     # Start discovery on launch in a thread
     #threading.Thread(target=DIrecorder.initialize, args=(root.quit,), daemon=True).start()
     SpatialRecorder.initialize()
