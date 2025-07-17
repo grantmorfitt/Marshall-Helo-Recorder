@@ -1,3 +1,13 @@
+"""
+@author: Grant Morfitt
+
+Desc:
+    
+Data Recorder for H125 Study w/ Marshall University
+Handles Spatial FOG Recorder, DI-2008, and Manuever Files
+
+"""
+
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
 from tkinter import ttk, scrolledtext
@@ -473,57 +483,50 @@ class SpatialFogDataRecorder:
         threading.Thread(target=self._process_thread, args = (SpatialFileName,), daemon=True).start()
         
     def _process_thread(self, filename):
-        
         spatial = spatial_device.Spatial(self.comport, self.baudrate)
         spatial.start()
         
         if spatial.is_open:
-          print(f"Spatial FOG connected to port:{spatial.port} with baud:{spatial.baud}")
-          spatial.flush()
-          
-          # Creates log file for received binary data from device          
-          logFile = open(f"{filename}", 'xb')
-
-          # Sets sensor ranges
-          spatial.set_sensor_ranges(True,
-                                    spatial_device.AccelerometerRange.accelerometer_range_4g,
-                                    spatial_device.GyroscopeRange.gyroscope_range_500dps,
-                                    spatial_device.MagnetometerRange.magnetometer_range_8g)
+            print(f"Spatial FOG connected to port: {spatial.port} with baud: {spatial.baud}")
+            spatial.flush()
     
-          spatial.get_device_and_configuration_information()
-          
-          last_heartbeat = time.time()
-          
-          self.acquiring = True
-          try:
-              while spatial.is_open and not self.stop_event.is_set():
-                  if spatial.in_waiting() > 0:
-                      if not self.stop_event.is_set():
-                          # Get bytes in serial buffer
-                          bytes_in_buffer = spatial.in_waiting()
-                          data_bytes = spatial.read(bytes_in_buffer)
-            
-                          # Record in log file the raw binary of ANPP packets
-                          logFile.write(data_bytes)
-                          if time.time() - last_heartbeat >= self.heartbeat_interval:
-                             self.log(f"{datetime.now().strftime('%H:%M:%S')} Spatial Fog: Heartbeat")
-                             last_heartbeat = time.time()
-                             
-                             
-                          #self.log(datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + " Spatial Record Bytes")
-                      
-              logFile.close()
-              self.acquiring = False
-              self.log(f"Spatial Data written to {filename}")
-
-          except Exception as e:
-              self.log(f"Spatial FOG Error: {e}")       
-              
-          
-              
+            try:
+                with open(f"{filename}", 'xb') as logFile:
+                    # Sets sensor ranges
+                    spatial.set_sensor_ranges(
+                        True,
+                        spatial_device.AccelerometerRange.accelerometer_range_4g,
+                        spatial_device.GyroscopeRange.gyroscope_range_500dps,
+                        spatial_device.MagnetometerRange.magnetometer_range_8g
+                    )
+        
+                    spatial.get_device_and_configuration_information()
+        
+                    last_heartbeat = time.time()
+                    self.acquiring = True
+        
+                    while spatial.is_open and not self.stop_event.is_set():
+                        if spatial.in_waiting() > 0:
+                            if not self.stop_event.is_set():
+                                # Get bytes in serial buffer
+                                bytes_in_buffer = spatial.in_waiting()
+                                data_bytes = spatial.read(bytes_in_buffer)
+        
+                                # Record raw binary data
+                                logFile.write(data_bytes)
+        
+                                if time.time() - last_heartbeat >= self.heartbeat_interval:
+                                    self.log(f"{datetime.now().strftime('%H:%M:%S')} Spatial Fog: Heartbeat")
+                                    last_heartbeat = time.time()
+        
+                self.acquiring = False
+                self.log(f"Spatial Data written to {filename}")
+        
+            except Exception as e:
+                self.log(f"Spatial FOG Error: {e}")
+    
         elif not spatial.is_open():
-            self.log("WARNING: Spatial Fog not detected!") 
-            
+            self.log("WARNING: Spatial Fog not detected!")
         
     
     def stop_acquisition(self):
@@ -547,31 +550,27 @@ class ManueverRecorder:
     def _process_thread(self, filename):
         print("STARTING MANEUVER LOGGING")
         
-        logFile = open(f"{filename}", 'w')
-        writer = csv.writer(logFile)
-        writer.writerow(["Time"] + ["Maneuver/Comments"])
-        
-        while not self.stop_event.is_set():
-
-           try:
-               # Default is blocking with no timeout
-               message = self.message_que.get(block=True, timeout=None)
-               if (message == "END"):
-                   break
-               
-               print(message)
-               message_time = message.split("_")[0]
-               message = "_".join(message.split("_")[1:])
-                
-               row = [message_time, message]
-               writer.writerow(row)
-               print(f"Writing message: {row}")
-               
-           except Exception as e:
-               self.log(f"Process maneuver error: {e}")
-               print(f"ERROR: {e}")
-    
-        logFile.close()
+        try:
+            with open(f"{filename}", 'w', newline='') as logFile:
+            # Default is blocking with no timeout
+                writer = csv.writer(logFile)
+                writer.writerow(["Time"] + ["Maneuver/Comments"])
+                while not self.stop_event.is_set():
+                    message = self.message_que.get(block=True, timeout=None)
+                    if (message == "END"):
+                        break
+                    
+                    print(message)
+                    message_time = message.split("_")[0]
+                    message = "_".join(message.split("_")[1:])
+                     
+                    row = [message_time, message]
+                    writer.writerow(row)
+                    print(f"Writing message: {row}")
+            
+        except Exception as e:
+            self.log(f"Process maneuver error: {e}")
+            print(f"ERROR: {e}")
         
         print("log file closed")
         
@@ -678,25 +677,22 @@ if __name__ == "__main__":
     root = tk.Tk()
 
     
-    DIrecorder = DIDataRecorder(log_callback=lambda msg: gui.log(msg))  # placeholder, will reassign after gui created
+    DIrecorder = DIDataRecorder(log_callback=lambda msg: gui.log(msg)) 
     SpatialRecorder = SpatialFogDataRecorder(log_callback=lambda msg: gui.log(msg))
     IOHelper = IOHelper(root)
     ManueverRecorder = ManueverRecorder(IOHelper, log_callback=lambda msg: gui.log(msg))
     
     gui = AppGUI(root, IOHelper, DIrecorder, SpatialRecorder, ManueverRecorder)
     
-
-    
     DIrecorder.gui = gui
     DIrecorder.log = gui.log  # assign log callback after GUI init.
     SpatialRecorder.log = gui.log
     ManueverRecorder.log = gui.log
-    # Start discovery on launch in a thread
-    #threading.Thread(target=DIrecorder.initialize, args=(root.quit,), daemon=True).start()
+    
+    #Device discovery and serial testing - ensures we can get data from device
     SpatialRecorder.initialize()
     DIrecorder.initialize()
 
-    root.protocol("WM_DELETE_WINDOW", lambda: MasterCloseSerial(SpatialRecorder, DIrecorder))
     root.mainloop()
     
     
