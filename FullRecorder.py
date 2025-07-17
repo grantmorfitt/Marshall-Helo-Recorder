@@ -41,9 +41,13 @@ class AppGUI:
         self.led_circle = self.led.create_oval(2, 2, 22, 22, fill="gray")
      
         # === BUTTONS ===
-        tk.Button(root, text="Start", command=self.start_acquisition, width=15).grid(row=1, column=0, padx=10, pady=10)
-        tk.Button(root, text="Stop", command=self.stop_acquisition, width=15).grid(row=1, column=1, padx=10, pady=10)
-        tk.Button(root, text="Quit", command=lambda: root.destroy(), width=15).grid(row=1, column=3, padx=10, pady=10)
+        self.start_button = tk.Button(root, text="Start", command=self.start_acquisition, width=15)
+        self.start_button.grid(row=1, column=0, padx=10, pady=10)
+        self.stop_button = tk.Button(root, text="Stop", command=self.stop_acquisition, width=15)
+        self.stop_button.grid(row=1, column=1, padx=10, pady=10)
+        self.stop_button['state'] = 'disabled'
+        self.quit_button = tk.Button(root, text="Quit", command=lambda: root.destroy(), width=15)
+        self.quit_button.grid(row=1, column=3, padx=10, pady=10)
      
         # === LOG BOX ===
         self.log_box = scrolledtext.ScrolledText(root, width=75, height=10, state='disabled')
@@ -55,8 +59,13 @@ class AppGUI:
      
         self.comment_time = tk.StringVar()
         self.comment_time.set("Time")
-        tk.Button(root, textvariable=self.comment_time, command=self.capture_time, width=10).grid(row=3, column=2, pady=(10, 20))
-        tk.Button(root, text="Submit Comment", command=self.submit_comment, width=15).grid(row=3, column=3, padx=(5, 10), pady=(10, 20))
+        self.time_button = tk.Button(root, textvariable=self.comment_time, command=self.capture_time, width=10)
+        self.time_button.grid(row=3, column=2, pady=(10, 20))
+        self.time_button['state'] = 'disabled'
+        
+        self.submit_comment_button = tk.Button(root, text="Submit Comment", command=self.submit_comment, width=15)
+        self.submit_comment_button.grid(row=3, column=3, padx=(5, 10), pady=(10, 20))
+        self.submit_comment_button['state'] = 'disabled'
      
         # === MANEUVER SECTION ===
         self.maneuver_frame = tk.Frame(root)
@@ -66,12 +75,14 @@ class AppGUI:
         self.maneuver_var = tk.StringVar()
         self.maneuver_combobox = ttk.Combobox(self.maneuver_frame, textvariable=self.maneuver_var, values=["Hover", "Climb", "Descent", "Turn", "Autorotation"], width=35)
         self.maneuver_combobox.grid(row=0, column=1, padx=(0, 10), pady=5, sticky='w')
-     
+        self.maneuver_combobox['state'] = 'disabled'
         self.maneuver_start_button = tk.Button(self.maneuver_frame, text="Start Maneuver", width=15, command=self.start_maneuver)
         self.maneuver_start_button.grid(row=0, column=2, padx=5, pady=5)
+        self.maneuver_start_button['state'] = 'disabled'
         self.maneuver_stop_button = tk.Button(self.maneuver_frame, text="Stop Maneuver", width=15, command=self.stop_maneuver)
         self.maneuver_stop_button.grid(row=0, column=3, padx=5, pady=5)
-     
+        self.maneuver_stop_button['state'] = 'disabled'
+        
         # === RIGHT SIDE VISUALIZATION ===
         self.visuals_frame = tk.Frame(root)
         self.visuals_frame.grid(row=0, column=4, rowspan=6, padx=(30, 30), pady=20, sticky='ns')
@@ -127,6 +138,9 @@ class AppGUI:
             self.comment_time.set("Time")
 
     def start_maneuver(self):
+        self.maneuver_stop_button['state'] = 'active'
+        self.maneuver_start_button['state'] = 'disabled'
+        
         maneuver = self.maneuver_var.get()
         current_time = datetime.now().strftime("%H:%M:%S")
         
@@ -139,6 +153,8 @@ class AppGUI:
             self.log("No maneuver selected!")
             
     def stop_maneuver(self):
+        self.maneuver_stop_button['state'] = 'disabled'
+        self.maneuver_start_button['state'] = 'active'
         maneuver = self.maneuver_var.get()
         current_time = datetime.now().strftime("%H:%M:%S")
         
@@ -208,7 +224,14 @@ class AppGUI:
         else: return f"{now}_{name}"
         
     def start_acquisition(self):
+        
         self.led.itemconfigure(self.led_circle, fill="green")
+        self.start_button['state'] = 'disabled'
+        self.stop_button['state'] = 'active'
+        self.maneuver_start_button['state'] = 'active'
+        self.maneuver_combobox['state'] = 'active'
+        self.submit_comment_button['state'] = 'active'
+        self.time_button['state'] = 'active'
         
         dirname = os.path.abspath(os.getcwd())
         filepath = dirname + '\\data\\'
@@ -225,6 +248,14 @@ class AppGUI:
         
         #this will need to pass filenames over once I get it set up properly
     def stop_acquisition(self):
+        self.stop_button['state'] = 'disabled'
+        self.start_button['state'] = 'active'
+        self.maneuver_start_button['state'] = 'disabled'
+        self.maneuver_stop_button['state'] = 'disabled'
+        self.maneuver_combobox['state'] = 'disabled'
+        self.submit_comment_button['state'] = 'disabled'
+        self.time_button['state'] = 'disabled'
+        
         self.led.itemconfigure(self.led_circle, fill="gray")
         self.data_recorder1.stop_acquisition()
         self.data_recorder2.stop_acquisition()
